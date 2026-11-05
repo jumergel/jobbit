@@ -1,0 +1,19 @@
+[project]
+name = "jobbit"
+version = "0.1.0"
+description = "Finds internship and full-time listings, stores them, and auto-fills applications using saved answers."
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.28",
+  "playwright>=1.64",
+  "streamlit>=1.67",
+  "rapidfuzz>=3.14",
+  "pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["jobbit", "jobbit.sources"]
