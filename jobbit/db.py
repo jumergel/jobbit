@@ -9,6 +9,11 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "jobbit.db"
 CATEGORIES = ("internship", "full_time", "part_time", "other")
 STATUSES = ("unexplored", "applied")
 
+# Only these have a saved default resume. 
+# Part-time / other jobs make you choose a resume each time you apply.
+RESUME_CATEGORIES = ("internship", "full_time")
+_RESUME_SQL = ", ".join(f"'{c}'" for c in RESUME_CATEGORIES)
+
 _CAT_SQL = ", ".join(f"'{c}'" for c in CATEGORIES)
 _STATUS_SQL = ", ".join(f"'{s}'" for s in STATUSES)
 
@@ -23,6 +28,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     status     TEXT NOT NULL DEFAULT 'unexplored'
                CHECK (status IN ({_STATUS_SQL})),
     notes      TEXT,
+    resume_used TEXT,
     found_at   TEXT NOT NULL,
     applied_at TEXT
 );
@@ -35,7 +41,7 @@ CREATE TABLE IF NOT EXISTS answers (
 );
 
 CREATE TABLE IF NOT EXISTS resumes (
-    category  TEXT PRIMARY KEY CHECK (category IN ({_CAT_SQL})),
+    category  TEXT PRIMARY KEY CHECK (category IN ({_RESUME_SQL})),
     file_path TEXT NOT NULL
 );
 """
@@ -84,11 +90,12 @@ def list_jobs(conn, status=None, category=None):
     return conn.execute(query, params).fetchall()
 
 
-def mark_applied(conn, job_id):
-    """Move a job from 'unexplored' to 'applied'."""
+def mark_applied(conn, job_id, resume_used=None):
+    """Move a job from 'unexplored' to 'applied', recording which resume was used."""
     conn.execute(
-        "UPDATE jobs SET status = 'applied', applied_at = ? WHERE id = ?",
-        (_now(), job_id),
+        """UPDATE jobs SET status = 'applied', applied_at = ?, resume_used = ?
+           WHERE id = ?""",
+        (_now(), resume_used, job_id),
     )
     conn.commit()
 
@@ -112,8 +119,9 @@ def list_answers(conn):
 # ---------- resumes ----------
 
 def set_resume(conn, category, file_path):
-    if category not in CATEGORIES:
-        raise ValueError(f"category must be one of {CATEGORIES}")
+    """Save the default resume for 'internship' or 'full_time'."""
+    if category not in RESUME_CATEGORIES:
+        raise ValueError(f"default resumes exist only for {RESUME_CATEGORIES}")
     conn.execute(
         """INSERT INTO resumes (category, file_path) VALUES (?, ?)
            ON CONFLICT(category) DO UPDATE SET file_path = excluded.file_path""",
@@ -123,7 +131,27 @@ def set_resume(conn, category, file_path):
 
 
 def get_resume(conn, category):
+    """Return the saved resume path for a category, or None."""
     row = conn.execute(
         "SELECT file_path FROM resumes WHERE category = ?", (category,)
     ).fetchone()
     return row["file_path"] if row else None
+
+
+def list_resumes(conn):
+    """Return {category: path} for the saved default resumes."""
+    rows = conn.execute("SELECT category, file_path FROM resumes").fetchall()
+    return {r["category"]: r["file_path"] for r in rows}
+
+
+def needs_resume_choice(category):
+    """True for part_time / other: the user picks a resume for each application."""
+    return category not in RESUME_CATEGORIES
+
+
+def resume_for_job(conn, job):
+    """Default resume path for a job, or None if the user must choose
+    (part_time / other) or no default has been uploaded yet."""
+    if needs_resume_choice(job["category"]):
+        return None
+    return get_resume(conn, job["category"])
